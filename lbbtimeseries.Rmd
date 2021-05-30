@@ -1,0 +1,213 @@
+---
+title: "New York Avocado Price Prediction : Time-Series Analysis"
+author: "By : Syabaruddin Malik"
+output:
+  html_document:
+    df_print: paged
+    highlight: zenburn
+    theme: spacelab
+    toc: true
+    toc_float:
+      collapsed: no
+    number_sections : True
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>")
+options(scipen = 9999)
+
+```
+
+# Introduction
+
+It is a well known fact that Millenials LOVE Avocado Toast :D . It's also a well known fact that all Millenials live in their parents basements :( .
+
+Clearly, they aren't buying home because they are buying too much Avocado Toast!
+
+Now let's help our Millenials in New York to predict avocado prices so they can save more to enjoy more avocados!
+
+![](C:/SyabaruddinFolder/Work/Algoritma/DATAScicourse/TimeSeries/LBBtimeseries/avocado.jpg)
+
+This data is downloaded from from link below:
+
+https://www.kaggle.com/neuromusic/avocado-prices
+
+# Exploratory Data
+
+## Import Library
+
+Let us import the library required.
+
+```{r}
+library(dplyr) # for data wrangling
+library(lubridate) # to dea with date
+library(padr) # for padding
+library(forecast) # time series library
+library(tseries) # for adf.test
+library(MLmetrics) # calculate error
+library(ggplot2)
+```
+
+## Import Data
+
+Let us import the data for the analysis.
+
+```{r}
+avocado <- read.csv("avocado.csv")
+avocado <- avocado %>% filter(region=="NewYork") %>% select(Date,AveragePrice)
+```
+
+## Data Pre-Processing
+
+Our Date column is still not in Date data type. We have to change to Date data type
+
+```{r}
+avocado$Date <- as.Date(avocado$Date)
+avocado$Date <- ymd(avocado$Date)
+```
+
+The characteristics of a Time Series object must consists of:
+
++ an ordered structure for the period
++ no missing period, and
++ no missing value
+
+Therefore, we need to do time series padding.
+
+```{r}
+avocado_clean <- avocado %>%
+  group_by(Date) %>% 
+  summarise(AveragePrice=mean(AveragePrice)) %>% 
+  arrange(Date) 
+
+avocado_clean   
+  
+```
+```{r}
+colSums(is.na(avocado_clean))
+```
+Our Dataset is ready. It is on periodic order, no missing period and no missing value.
+
+# Time Series Analysis
+
+## TS Object
+
+Before we do analysis and make prediction, we have to make our data set as a Time-Series (TS) Object
+
+```{r}
+avocado_ts <- ts(data = avocado_clean$AveragePrice,
+   start = 2015,
+   frequency = 48)
+```
+
+In this section, I tried to explore whether our timeseries object has trend and seasonal properties (one-seasonal/multiseasonal).
+
+```{r}
+avocado_deco <- avocado_ts %>%  decompose() %>% plot()
+```
+If we look at plot above, the data has trend and seasonality
+
+
+## Cross Validation
+
+The cross-validation scheme for time series should not be sampled randomly, but splitted sequentially.
+
+```{r}
+# 24 latest week for  test
+avocado_test <- tail(avocado_ts, 24)
+
+avocado_train <- head(avocado_ts, -24)
+```
+
+
+
+## Model Building
+
+This time, I will compare between two of the widely used time series modeling in business and industry: Holt-Winters and Seasonal Arima. I use Holt-Winters because my data contain both seasonality and trend. I also want to compare it between seasonal Arima to check whether seasonal ARIMA can give better forecasting performance.
+
+```{r}
+# Holt-Winters
+avocado_hw <- HoltWinters(avocado_train) 
+# ARIMA
+avocado_arima <- auto.arima(avocado_train, seasonal = T)
+```
+
+
+## Forecast & Evaluation
+
+Now we are going to forecast and evaluate our models
+
+```{r}
+#forecast
+
+avocado_hw_f <- forecast(avocado_hw,h=24)
+avocado_arima_f <- forecast(avocado_arima,h=24)
+
+```
+
+Now let us compare our Models performance
+
+```{r}
+#Holts-Winter Model
+accuracy(avocado_hw_f,avocado_test)
+
+#Arima Model
+accuracy(avocado_arima_f,avocado_test)
+```
+
+If we look at above result, we found that our *Arima* model is the best model with lower MAPE value.
+
+## Assumption
+
+Our model needs to fullfil 2 assumption requirements: Normality & Non-Correlation with our model forecast residuals.
+
+### Normality
+
+We check our model forecast residuals normality using Shapiro-wik test
+
+```{r}
+shapiro.test(avocado_arima_f$residuals)
+# p-value < 0.05; normally distributed
+```
+the p-value < 0.05, so we can say that our model residuals are normally distributed
+
+### Autocorrelation
+
+We check the correlation between our model forecast residuals using Box test with Ljung-Box type
+
+```{r}
+Box.test(avocado_arima_f$residuals, type = "Ljung-Box") 
+#p-value > alpha (0.05);no auto correlation
+```
+the p-value > 0.05, so we can say that there is no auto-correlation between our model forecast residuals.
+
+# Model Price Prediction 
+
+Now we know that our best model is Arima Model. Our data is up to March-2018. Now we would like to find out the next 48 weeks (up to early 2019) price prediction using our model
+
+```{r}
+#next 48 weeks price prediction (Price/piece in USD)  :
+  
+model_prod <- auto.arima(avocado_ts)
+
+avocado_pro_f <- forecast(model_prod,h=48)
+
+avocado_pro_f$mean
+```
+
+```{r}
+avocado_ts %>% 
+    autoplot(series = "Actual") +
+  autolayer(avocado_pro_f$mean, series = "ARIMA")  +
+  labs(title="Avocado Price Prediction in New York",
+       y="Price/Piece in USD")
+
+```
+
+
+
+
